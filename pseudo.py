@@ -1,5 +1,9 @@
 import re
 
+class test:
+    def __init__(self):
+        pass
+
 class MetaComponent(type):
     def __new__(cls, name, bases, attrs):
         
