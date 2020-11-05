@@ -1,4 +1,3 @@
-import re
 
 class MetaComponent(type):
     def __new__(cls, name, bases, attrs):
