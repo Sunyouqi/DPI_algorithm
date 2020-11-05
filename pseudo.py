@@ -94,6 +94,7 @@ class Node:
             if not isinstance(each_component , VoltageSource) and not isinstance(each_component , CurrentSource):
                 impedence += self.in_parallel( impedence , each_component.resistance )
 
+        # dpi * short_circuit crruent
         # compute the current flow in or out on each branch connected to this node
             # need further polish
         current_Isc = dict()
