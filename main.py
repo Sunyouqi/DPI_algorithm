@@ -1,6 +1,8 @@
 from DPI import *
 import circuit
 import json
+import johns_algorithm as ja
+import time
 
 def convert_to_JSON(graph):
     preprocess = {}
@@ -90,26 +92,83 @@ def test3():
         print(v.components)
         print(v.voltage)
         print("=================")
-    graph.process_nodeList()
+    
     print("after dpi:")
     for k , v in graph.nodes_list.items():
         print(k+":")
         print("short circuit current: " + v.short_circuit_I)
         print("DPImpedence: " + v.DPImpedence)
-    graph.generate()
+    #graph.generate()
     print("edge list:")
     print(graph.edge_list)
     print("voltage node list:")
     print(graph.nodes_list)
     print("short circuit node list:")
     print(graph.short_circuit_nodes)
+    #graph.generate_adjacent()
+    print(graph.adjacency)
     node = Node(node_name="shit",is_ground=False)
     print(node)
     convert_to_JSON(graph)
     
+    SCC = ja.Strongly_connected_components()
+    r_graph = SCC.reverse_graph(graph)
+    
+    print(r_graph)
+    print(r_graph.vertex)
+    
+    print("graph node name map:")
+    print(graph.nodes_name_map)
+    print("graph vertex")
+    print(graph.vertex)
+    for v in graph.vertex:
+        print(graph.nodes_name_map[v.node_name])
+    
+    result = SCC.scc(graph)
+    print("result of strongly connected components:")
+    print(result)
+    
+    start_time = time.time()
+    John = ja.Cycle_finding()
+    result_c = John.simple_cycles(graph)
+    print("all cycles : ", result_c)
+    end_time = time.time()
+    print("time elipse: ", end_time - start_time)
+    
+    
+def test_john():
+    graph = SFGraph(dict())
+    graph.add_edge(0,1,1)
+    graph.add_edge(1,2,1)
+    graph.add_edge(2,0,1)
+    graph.add_edge(1,3,1)
+    graph.add_edge(3,4,1)
+    graph.add_edge(4,5,1)
+    graph.add_edge(5,3,1)
+    graph.add_edge(5,6,1)
+    print(graph.nodes_name_map)
+    print(graph.vertex)
+    #SCC = ja.Strongly_connected_components()
+    #result = SCC.scc(graph)
+    #print()
+    #print(result)
+    #print(len(result))
+    start_time = time.time()
+    John = ja.Cycle_finding()
+    result_c = John.simple_cycles(graph)
+    print("all cycles : ", result_c)
+    end_time = time.time()
+    print("time elipse: ", end_time - start_time)
+    #print(graph.nodes_name_map.values())
+    #print(graph.vertex[0] in graph.nodes_name_map.values())
+    #print(graph.vertex[0] is graph.nodes_name_map[graph.vertex[0].node_name])
+    #print(len(graph.vertex))
+
 if __name__ == "__main__":
     test3()
     #run_test1()
     #run_test2()
+    #test_john()
+   
     
     

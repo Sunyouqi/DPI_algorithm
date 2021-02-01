@@ -1,6 +1,7 @@
 import re
 import networkx as nx
 import circuit as cir
+from collections import defaultdict
 
 class test:
     def __init__(self):
@@ -75,14 +76,71 @@ class SFGraph(object):
     
     def __init__(self , nodes_list):
         self.nodes_list = nodes_list
-        
+        self.short_circuit_nodes = {}
+        self.edge_list = []
+        self.adjacency = defaultdict(list)
+        self.nodes_name_map = {}
+        self.vertex = []
         pass
+    
+    def add_edge(self , source , target , weight):
+        #print("in add edge")
+        #print(type(source))
+        source_node = Node( node_name = str(source) , is_ground = False )
+        target_node = Node( node_name = str(target) , is_ground = False )
+        self.edge_list.append( Edge( source_node.node_name , target_node.node_name , weight ) )
+        if target_node.node_name not in self.nodes_name_map:
+            #if str(target) not in self.nodes_name_map:
+                #flag = True
+            
+            self.nodes_name_map.update( { target_node.node_name : target_node } )
+            self.nodes_name_map[target_node.node_name].node_number = target
+            #if flag:
+            self.vertex.append(self.nodes_name_map[target_node.node_name])
+        
+        
+        if source_node.node_name not in self.nodes_name_map:
+            
+            self.nodes_name_map.update( { source_node.node_name : source_node } )
+            self.nodes_name_map[ source_node.node_name ].node_number = source
+            self.vertex.append(self.nodes_name_map[ source_node.node_name ])
+            
+        self.nodes_name_map[source_node.node_name].adj_nodes.append(self.nodes_name_map[ target_node.node_name ])
+            
+                
+        
+        self.vertex.sort(reverse = False , key = lambda x : x.node_number)
+    
+    def generate_adjacent(self):
+        
+       
+        self.nodes_name_map.update(self.nodes_list)
+        self.nodes_name_map.update(self.short_circuit_nodes)
+        index = 0
+        self.nodes_name_map.pop("V0")
+        for k in self.nodes_name_map.keys():
+            self.nodes_name_map[k].node_number = index
+            self.vertex.append(self.nodes_name_map[k])
+            index += 1
+            
+        #print(self.vertex)
+        
+        #self.graph_nodes.pop("0")
+        for edge in self.edge_list:
+            if self.nodes_name_map[edge.target].node_number not in self.adjacency[self.nodes_name_map[edge.source].node_number]:
+                self.adjacency[self.nodes_name_map[edge.source].node_number].append(self.nodes_name_map[edge.target].node_number)
+        for i in range(len(self.vertex)):
+            for v_number in self.adjacency[self.vertex[i].node_number]:
+                self.vertex[i].adj_nodes.append( self.vertex[ v_number ] )
+            #print("vertex: " + str(self.vertex[i].node_number))
+            #print(self.vertex[i].adj_nodes)
+        
+        
     def arrange_attr(self):
         # this part depends on the parser output
         pass
     def generate(self):
-        self.short_circuit_nodes = {}
-        self.edge_list = []
+        
         for k , v in self.nodes_list.items():
             if v.voltage != 0:
                 name = "Isc" + k[1:]
@@ -126,13 +184,17 @@ class SFGraph(object):
             each_node.DPI_analysis()
         pass
     def __repr__(self):
+        #result = []
+        #for each_node in self.nodes_list:
+            #result.append(each_node.__repr__())
+        #return '\n'.join(result)
         result = []
-        for each_node in self.nodes_list:
-            result.append(each_node.__repr__())
-        return '\n'.join(result)
-    def __getattr__( self, name ):
-        return getattr(self.nodes_list , name)
-        
+        for e in self.edge_list:
+            result.append(e.__repr__())
+        return "graph edges: \n" + '\n'.join(result)
+    #def __getattr__( self, name ):
+     #   return getattr(self.nodes_list , name)
+    
 class Edge:
     def __init__(self, source , target , weight):
         self.source = source
@@ -146,11 +208,12 @@ class Node:
     def __init__(self, **kwargs):
         # name of this node
         self.components = {}
-        self.neighbor_edge = {}
+        self.adj_nodes = []
+        self.node_number = 0
         self.voltage = 0 if kwargs["is_ground"] is True else "V" + kwargs["node_name"].lower() if not kwargs["node_name"].startswith("V") else kwargs["node_name"]
         self.short_circuit_I = "0"
         self.DPImpedence = "0"
-        self.node_name =  kwargs["node_name"].lower()
+        self.node_name =  "V" + kwargs["node_name"].lower() if not kwargs["node_name"].startswith("V") and not kwargs["node_name"].startswith("I") else kwargs["node_name"]
         if self.voltage == 0:
             return
         
@@ -160,14 +223,16 @@ class Node:
         if "components" in kwargs:
             self.components = kwargs["components"]
         
+   
         
+    
     def add_components(self, input_list):
         self.components.update(input_list)
     
     def __repr__(self):
         if self.voltage == 0:
             return "ground"
-        return " NodeInfor:"+ self.node_name #+" voltage: " + self.voltage + "\n short circuit current: "+ self.short_circuit_I + "\n  driving point impedence:" + self.DPImpedence
+        return " NodeInfor: node_id " + str(self.node_number) + " node_name " + self.node_name #+" voltage: " + self.voltage + "\n short circuit current: "+ self.short_circuit_I + "\n  driving point impedence:" + self.DPImpedence
     
     def in_parallel(self, r1 , r2):
         return 1 / ( 1/r1 + 1/r2 )
@@ -213,9 +278,9 @@ def construct_graph( circuit : cir.Circuit ):
     for node , neighbors in circuit.multigraph.adjacency():
         if node not in circuit_nodes:
             ground = True if node == "0" else False
-            node_name =  node
+            node_name =  "V" + node.lower() if not node.startswith("V") else node
             circuit_nodes[ node ] = Node( node_name = node, is_ground = ground )
-            graph.update( {node_name: circuit_nodes[ node ]} )
+            graph.nodes_list.update( {node_name: circuit_nodes[ node ]} )
             
     print(circuit_nodes)
     for edge in circuit.multigraph.edges(keys=True, data='component'):
@@ -240,7 +305,9 @@ def construct_graph( circuit : cir.Circuit ):
         
         circuit_nodes[src_node].add_components({circuit_components[component_name] : circuit_nodes[dst_node]})
         circuit_nodes[dst_node].add_components({circuit_components[component_name] : circuit_nodes[src_node]})
-        
+    graph.process_nodeList()
+    graph.generate()
+    graph.generate_adjacent()
     return graph
                 
 
