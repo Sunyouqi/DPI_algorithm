@@ -121,12 +121,12 @@ class Cycle_finding:
         return min_index , min_vertex
                 
     def unblock(self, vertex):
-        print("in  unblock: unblocking ", vertex)
-        print(self.blocked_set)
-        print("unblock map for current node:")
-        print(self.blocked_map[vertex])
+        #print("in  unblock: unblocking ", vertex)
+        #print(self.blocked_set)
+        #print("unblock map for current node:")
+        #print(self.blocked_map[vertex])
         if vertex not in self.blocked_set:
-            return 
+            return
         self.blocked_set.remove(vertex)
         if len( self.blocked_map[vertex] ) > 0:
             for v in self.blocked_map[vertex]:
@@ -139,7 +139,7 @@ class Cycle_finding:
         self.blocked_set.add(current_vertex)
         found_cycle = False
         got_cycle = False
-        print("at the beginning of algorithm, current_vertex: ",current_vertex)
+        #print("at the beginning of algorithm, current_vertex: ",current_vertex)
         for neighbor in current_vertex.adj_nodes:
             if neighbor is start_vertex:
                 self.stack.append(start_vertex)
@@ -147,7 +147,7 @@ class Cycle_finding:
                 cycle.reverse()
                 self.stack.pop()
                 self.all_cycles.append(cycle)
-                print("find cycle")
+                #print("find cycle")
                 found_cycle = True
             elif neighbor not in self.blocked_set:
                 got_cycle = self.find_cycles_in_scc( start_vertex , neighbor )
@@ -166,15 +166,15 @@ class Cycle_finding:
     def simple_cycles(self, graph):
         start_index = 0
         SCC = Strongly_connected_components()
-        print("algorithm begins",len(graph.vertex))
+        #print("algorithm begins",len(graph.vertex))
         while start_index <= len(graph.vertex):
-            print("in loop , start index",start_index)
+            #print("in loop , start index",start_index)
             subGraph = self.create_subgraph(start_index , graph)
             sccs = SCC.scc(subGraph)
-            print("sccs: ", sccs)
-            print("subgraph:" , subGraph)
+            #print("sccs: ", sccs)
+            #print("subgraph:" , subGraph)
             maybe_least_index = self.get_least_index_scc(sccs , subGraph )
-            print("least index: ", maybe_least_index)
+            #print("least index: ", maybe_least_index)
             if maybe_least_index[0] >= start_index:
                 least_vertex = maybe_least_index[1]
                 self.blocked_map.clear()
