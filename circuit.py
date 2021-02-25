@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from dataclasses import dataclass
-import re
 import networkx as nx
+import re
+import sympy as sp
 
 
 class ComponentFactory:
@@ -36,6 +37,11 @@ class TwoTerminal:
     def __init__(self, pos_node: str, neg_node: str):
         self.pos_node = pos_node
         self.neg_node = neg_node
+
+    @property
+    @abstractmethod
+    def impedance(self):
+        ...
 
 
 class Component(ABC):
@@ -93,6 +99,9 @@ class VoltageSource(Component, TwoTerminal):
         args = entry.split(' ', 3)
         return cls(*args)
 
+    def to_netlist_entry(self) -> str:
+        return ' '.join([self.name, self.pos_node, self.neg_node, self.voltage])
+
 
 class CurrentSource(Component, TwoTerminal):
 
@@ -115,6 +124,9 @@ class CurrentSource(Component, TwoTerminal):
         args = entry.split(' ', 3)
         return cls(*args)
 
+    def to_netlist_entry(self) -> str:
+        return ' '.join([self.name, self.pos_node, self.neg_node, self.current])
+
 
 class VoltageDependentCurrentSource(Component, TwoTerminal):
 
@@ -133,6 +145,10 @@ class VoltageDependentCurrentSource(Component, TwoTerminal):
         args = entry.split(' ', 5)
         return cls(*args)
 
+    def to_netlist_entry(self) -> str:
+        return ' '.join([self.name, self.pos_node, self.neg_node, self.pos_input_node,
+                         self.neg_input_node, self.gain])
+
 
 class Resistor(Component, TwoTerminal):
 
@@ -147,6 +163,13 @@ class Resistor(Component, TwoTerminal):
     def from_netlist_entry(cls, entry: str) -> 'Resistor':
         args = entry.split(' ', 3)
         return cls(*args)
+
+    def to_netlist_entry(self) -> str:
+        return ' '.join([self.name, self.pos_node, self.neg_node, self.value])
+
+    @property
+    def impedance(self):
+        return sp.symbols(self.name)
 
 
 class Capacitor(Component, TwoTerminal):
@@ -163,6 +186,13 @@ class Capacitor(Component, TwoTerminal):
     def from_netlist_entry(cls, entry: str) -> 'Capacitor':
         args = entry.split(' ', 3)
         return cls(*args)
+
+    def to_netlist_entry(self) -> str:
+        return ' '.join([self.name, self.pos_node, self.neg_node, self.capacitance])
+
+    @property
+    def impedance(self):
+        return 1 / (sp.symbols('s') * sp.symbols(self.name))
 
 
 class BipolarTransistor(Component):
@@ -184,11 +214,11 @@ class BipolarTransistor(Component):
         return cls(*args)
 
     def small_signal_components(self, model: 'HybridPiModel') -> List[Component]:
-        rpi = Resistor('rpi_' + self.name, self.base, self.emitter, model.rpi)
-        g = VoltageDependentCurrentSource('g_' + self.name, self.collector,
+        rpi = Resistor('RPI_' + self.name, self.base, self.emitter, model.rpi)
+        g = VoltageDependentCurrentSource('G_' + self.name, self.collector,
                                           self.emitter, self.base,
                                           self.emitter, model.gm)
-        ro = Resistor('ro_' + self.name, self.collector, self.emitter, model.ro)
+        ro = Resistor('RO_' + self.name, self.collector, self.emitter, model.ro)
         return [rpi, g, ro]
 
 
@@ -202,8 +232,7 @@ class HybridPiModel:
     ro: str
 
     @classmethod
-    def from_ltspice_op_log(cls, op_log_file: str, encoding: str = 'utf-8') \
-            -> Dict[str, 'HybridPiModel']:
+    def from_ltspice_op_log(cls, log: str) -> Dict[str, 'HybridPiModel']:
         """
         Parses an operating point analysis log file produced by LTspice and
         extracts the hybrid-pi small-signal parameters for each transistor.
@@ -212,46 +241,45 @@ class HybridPiModel:
         :param encoding: the file encoding, defaults to "utf-8"
         :return: a dictionary of models with transistor names as keys
         """
-        with open(op_log_file, 'r', encoding=encoding) as log:
-            transistor_section = False
-            valid_keys = {'gm', 'rpi', 'ro'}
-            transistor_names = None
-            models = None
+        transistor_section = False
+        valid_keys = {'gm', 'rpi', 'ro'}
+        transistor_names = None
+        models = None
 
-            for line in log:
-                if transistor_section:
-                    # Currently inside a transistor section.
+        for line in log.splitlines():
+            if transistor_section:
+                # Currently inside a transistor section.
 
-                    # Data in transistor section is whitespace-delimited.
-                    row = re.findall(r'\S+', line)
+                # Data in transistor section is whitespace-delimited.
+                row = re.findall(r'\S+', line)
 
-                    if not row:
-                        # The end of a transistor section is marked by an empty
-                        # line.
-                        transistor_section = False
-                        continue
+                if not row:
+                    # The end of a transistor section is marked by an empty
+                    # line.
+                    transistor_section = False
+                    continue
 
-                    # Strip trailing ":" character from row header.
-                    key = row[0][:-1].lower()
+                # Strip trailing ":" character from row header.
+                key = row[0][:-1].lower()
 
-                    if key == 'name':
-                        # Initialize models with transistor names as keys, and
-                        # {} as values. As we iterate over subsequent rows, {}
-                        # is populated.
-                        transistor_names = row[1:]
-                        models = dict.fromkeys(transistor_names, {})
+                if key == 'name':
+                    # Initialize models with transistor names as keys, and
+                    # {} as values. As we iterate over subsequent rows, {}
+                    # is populated.
+                    transistor_names = row[1:]
+                    models = dict.fromkeys(transistor_names, {})
 
-                    elif key in valid_keys:
-                        # Add parameter name-value pair for each transistor.
-                        for name, value in zip(transistor_names, row[1:]):
-                            models[name][key] = value
+                elif key in valid_keys:
+                    # Add parameter name-value pair for each transistor.
+                    for name, value in zip(transistor_names, row[1:]):
+                        models[name][key] = value
 
-                else:
-                    # Check that the line is a transistor section header. Set
-                    # the transistor_section flag accordingly.
-                    match = transistor_section_pattern.match(line)
-                    # For now, handle only BJTs.
-                    transistor_section = match and match.group(1) == 'Bipolar'
+            else:
+                # Check that the line is a transistor section header. Set
+                # the transistor_section flag accordingly.
+                match = transistor_section_pattern.match(line)
+                # For now, handle only BJTs.
+                transistor_section = match and match.group(1) == 'Bipolar'
 
         for name in models:
             # Construct HybridPiModel instances from using dictionary as kwargs.
@@ -267,42 +295,65 @@ class Circuit:
         self.multigraph = multigraph
 
     def print_components(self):
-        for e in self.multigraph.edges(data=True):
-            src_node, dest_node, edge_attrbs = e
-            print(src_node, dest_node, edge_attrbs['component'])
+        for e in self.multigraph.edges(data='component'):
+            src_node, dest_node, component = e
+            print(src_node, dest_node, component)
+
+    def iter_nodes(self):
+        yield from self.multigraph
+
+    def iter_neighbours(self, node):
+        for nbr, edgedict in self.multigraph.adj[node].items():
+            for edge_key, edge_attribs in edgedict.items():
+                yield nbr, edge_attribs['component']
+
+    def iter_components(self) -> Tuple[str, str, Component]:
+        for e in self.multigraph.edges(data='component'):
+            src_node, dest_node, component = e
+            yield src_node, dest_node, component
+
+    def netlist(self) -> str:
+        return '\n'.join(c.to_netlist_entry() for _, _, c in self.iter_components())
 
     @classmethod
-    def from_ltspice(cls, netlist_file: str, op_log_file: str) -> 'Circuit':
-        models = HybridPiModel.from_ltspice_op_log(op_log_file)
+    def from_ltspice(cls, netlist: str, op_log: str = None) -> 'Circuit':
+        if op_log is None:
+            models = {}
+        else:
+            models = HybridPiModel.from_ltspice_op_log(op_log)
+
         multigraph = nx.MultiGraph()
         dc_sources = []
-        with open(netlist_file, 'r', encoding='utf-8') as netlist:
-            for line in netlist:
-                if line.startswith('.') or line.startswith('*'):
-                    # LTspice comments are ignored.
-                    continue
 
-                # Instantiate component.
-                comp = ComponentFactory.from_netlist_entry(line.rstrip('\n'))
+        for line in netlist.splitlines():
+            if line.startswith('.') or line.startswith('*'):
+                # LTspice comments are ignored.
+                continue
 
-                if isinstance(comp, TwoTerminal):
-                    # Two terminal components are added to the graph as-is.
+            # Instantiate component.
+            comp = ComponentFactory.from_netlist_entry(line)
+
+            if isinstance(comp, TwoTerminal):
+                # Two terminal components are added to the graph as-is.
+                multigraph.add_edge(comp.pos_node, comp.neg_node,
+                                    key=comp.name, component=comp)
+
+                # Mark DC sources to be turned off later.
+                if (isinstance(comp, VoltageSource) or
+                        isinstance(comp, CurrentSource)) and comp.is_dc():
+                    dc_sources.append(comp)
+
+            elif isinstance(comp, BipolarTransistor):
+                # Transistors are first converted to small signal
+                # equivalents components.
+                model = models[comp.name.lower()]
+                small_signal_comps = comp.small_signal_components(model)
+                for comp in small_signal_comps:
                     multigraph.add_edge(comp.pos_node, comp.neg_node,
                                         key=comp.name, component=comp)
 
-                    # Mark DC sources to be turned off later.
-                    if (isinstance(comp, VoltageSource) or
-                            isinstance(comp, CurrentSource)) and comp.is_dc():
-                        dc_sources.append(comp)
-
-                elif isinstance(comp, BipolarTransistor):
-                    # Transistors are first converted to small signal
-                    # equivalents components.
-                    model = models[comp.name.lower()]
-                    small_signal_comps = comp.small_signal_components(model)
-                    for comp in small_signal_comps:
-                        multigraph.add_edge(comp.pos_node, comp.neg_node,
-                                            key=comp.name, component=comp)
+        if op_log is None:
+            return cls(multigraph)
 
         for source in dc_sources:
             if isinstance(source, VoltageSource):
@@ -323,7 +374,8 @@ class Circuit:
                 # and relabel their pos_node and/or neg_nodes.
                 for nbr, nbrdict in multigraph.adj[relabel_from].items():
                     for edge in nbrdict.items():
-                                                                                                                                            
+                        # node_from, node_to, edge_key, component
+                        # print(relabel_from, nbr, edge[0], edge[1]['instance'])
                         instance = edge[1]['component']
 
                         if instance.pos_node == relabel_from:
@@ -345,60 +397,70 @@ if __name__ == '__main__':
     from os import path
     test_data_dir = path.join(path.dirname(__file__), 'test_data')
 
-    netlist_file = path.join(test_data_dir, 'npn_ce.cir')
-    log_file = path.join(test_data_dir, 'npn_ce.log')
+    netlist_file = path.join(test_data_dir, 'simple_rc.net')
+    log_file = path.join(test_data_dir, 'simple_rc.log')
+
+    with open(netlist_file) as f:
+        netlist = f.read()
+
+    with open(log_file) as f:
+        log = f.read()
 
     # Instantiate a circuit by passing in the netlist file and log file.
     # The circuit will be converted to small-signal.
-    circuit = Circuit.from_ltspice(netlist_file, log_file)
+    circuit = Circuit.from_ltspice(netlist)
 
-    print('\nIterating through nodes:')
-    for node in circuit.multigraph.nodes:
-        print(node)
+    # print('\nIterating through nodes:')
+    # for node in circuit.multigraph.nodes:
+    #     print(node)
+    #
+    # print('\nIterating through edges:')
+    # for edge in circuit.multigraph.edges:
+    #     src_node, dst_node, component_name = edge
+    #     print(f'{component_name}: {src_node} <-> {dst_node}')
 
-    print('\nIterating through edges:')
-    for edge in circuit.multigraph.edges:
-        src_node, dst_node, component_name = edge
-        print(f'{component_name}: {src_node} -> {dst_node}')
+    # print('\nIterating through edges, this time with component names and objects:')
+    # for edge in circuit.multigraph.edges(keys=True, data='component'):
+    #     src_node, dst_node, component_name, component_obj = edge
+    #     print(f'{component_name}: {src_node} <-> {dst_node}')
+    #     print(f'\t{component_obj}')
+    #
+    #     # Node that because the multigraph is undirected, we need some way to
+    #     # keep track of the polarity of components. This is done by inspecting
+    #     # component objects, which are instances of Component classes. They
+    #     # specify which node is positive and which node is negative.
+    #
+    #     # Example:
+    #     # V2: 0 <-> Vin
+    #     #
+    #     # V2 is the name of a voltage source.
+    #     # V2 exists between node 0 and node Vin.
+    #     # V2.pos_node is Vin, meaning Vin is the positive node.
+    #     # V2.neg_node is 0, meaning 0 is the negative node.
 
-    print('\nIterating through edges, this time with component names and objects:')
-    for edge in circuit.multigraph.edges(keys=True, data='component'):
-        src_node, dst_node, component_name, component_obj = edge
-        print(f'{component_name}: {src_node} <-> {dst_node}')
-        print(f'\t{component_obj}')
+    for node in circuit.iter_nodes():
+        for nbr, component in circuit.iter_neighbours(node):
+            print(f'{node} <-> {nbr}: {component}')
 
-        # Node that because the multigraph is undirected, we need some way to
-        # keep track of the polarity of components. This is done by inspecting
-        # component objects, which are instances of Component classes. They
-        # specify which node is positive and which node is negative.
+    # for n, nbrsdict in circuit.multigraph.adjacency():
+    #     print('*' * 100)
+    #     print(f'Current node = {n}')
+    #     # print(f'\tNeighbours = {[nbr for nbr in nbrsdict]}')
+    #
+    #     for nbr, edgedict in nbrsdict.items():
+    #         print(f'\tNeighbour = {nbr}')
+    #         # print(f'\tEdges between {n} and {nbr}: {[key for key in edgedict]}')
+    #
+    #         for key, edge_attrib_dict in edgedict.items():
+    #             print(f'\t\tComponent {key}: {n} <-> {nbr}')
+    #             component_obj = edge_attrib_dict['component']
+    #             print(f'\t\t\t{component_obj}')
 
-        # Example:
-        # V2: 0 -> Vin
-        #
-        # V2 is the name of a voltage source.
-        # V2 exists between node 0 and node Vin.
-        # V2.pos_node is Vin, meaning Vin is the positive node.
-        # V2.neg_node is 0, meaning 0 is the negative node.
 
-    print('\nIterating through all nodes and their neighbours:')
-    for n, nbrsdict in circuit.multigraph.adjacency():
-        print(f'Current node is {n}')
-        print(f'\tNeighbours = {[nbr for nbr in nbrsdict]}')
-        for nbr, edgedict in nbrsdict.items():
-            print(f'\tNeighbour {nbr}')
-            print(f'\tEdges between {n} and {nbr}: {[key for key in edgedict]}')
-
-            for key, edge_attrib_dict in edgedict.items():
-                print(f'\t\tComponent {key}: {n} <-> {nbr}')
-                component_obj = edge_attrib_dict['component']
-                print(f'\t\t{component_obj}')
-        
-
-    print(f'\nAccess the neighbours of a specific node "VE":')
-    for nbr, edgedict in circuit.multigraph['VE'].items():
-        print(f'\tNeighbour: {nbr}')
-        for key, edge_attrib_dict in edgedict.items():
-            print(f'\t\tComponent {key}: {n} <-> {nbr}')
-            component_obj = edge_attrib_dict['component']
-            print(f'\t\t{component_obj}')
-        
+    # print(f'\nAccess the neighbours of a specific node "VE":')
+    # for nbr, edgedict in circuit.multigraph['VE'].items():
+    #     print(f'\tNeighbour: {nbr}')
+    #     for key, edge_attrib_dict in edgedict.items():
+    #         print(f'\t\tComponent {key}: {n} <-> {nbr}')
+    #         component_obj = edge_attrib_dict['component']
+    #         print(f'\t\t{component_obj}')

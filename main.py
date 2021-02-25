@@ -3,6 +3,7 @@ import circuit
 import json
 import johns_algorithm as ja
 import time
+import mason
 
 def convert_to_JSON(graph):
     preprocess = {}
@@ -163,9 +164,48 @@ def test_john():
     #print(graph.vertex[0] in graph.nodes_name_map.values())
     #print(graph.vertex[0] is graph.nodes_name_map[graph.vertex[0].node_name])
     #print(len(graph.vertex))
+def test4():
+    from os import path
+    test_data_dir = path.join(path.dirname(__file__), 'test_data')
 
+    netlist_file = path.join(test_data_dir, 'npn_ce.cir')
+    log_file = path.join(test_data_dir, 'npn_ce.log')
+    with open(netlist_file) as f:
+        netlist = f.read()
+
+    with open(log_file) as f:
+        log = f.read()
+    c_in = circuit.Circuit.from_ltspice(netlist,log)
+    for n in c_in.multigraph.nodes:
+        print("node:")
+        print(n)
+        print("neighbors:")
+        for ne in c_in.multigraph.neighbors(n):
+            print("neighbor_node")
+            print(ne)
+            print("edges:")
+            for k in c_in.multigraph.get_edge_data(n , ne):
+                print(k)
+                print(c_in.multigraph.edges[n,ne,k])
+                print(c_in.multigraph.edges[n,ne,k]["component"].name)
+                if isinstance(c_in.multigraph.edges[n,ne,k]["component"] , circuit.VoltageDependentCurrentSource):
+                    print("type of pos node")
+                    print(type(c_in.multigraph.edges[n,ne,k]["component"].pos_node))
+    for edge in c_in.multigraph.edges(data = "component"):
+        print(edge)
+    sfg = DPI_algorithm(c_in)
+    h = mason.transfer_function(sfg.graph, 'Vn001', 'Vn002')
+    mason.sp.pprint(h.factor(), use_unicode=True)
+
+    #print(h)
+        #source, target , weight_name , component = edge
+        #print(source , target , weight_name , component)
+        #print(edge.weight)
+        #print(e.component_object)
+    
 if __name__ == "__main__":
-    test3()
+    test4()
+    #test3()
     #run_test1()
     #run_test2()
     #test_john()

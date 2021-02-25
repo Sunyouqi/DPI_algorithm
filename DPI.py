@@ -2,6 +2,7 @@ import re
 import networkx as nx
 import circuit as cir
 from collections import defaultdict
+import sympy as sy
 
 class test:
     def __init__(self):
@@ -72,6 +73,77 @@ class Capacitor(Component):
         
 
 
+class SFG():
+    def __init__(self):
+        self.graph = nx.DiGraph()
+    
+    def add_edge(self, source , target , wt):
+        self.graph.add_edge(source, target , weight = wt)
+    
+def DPI_algorithm( circuit : cir.Circuit ):
+    sfg = SFG()
+    impedance_list = []
+    for n in circuit.multigraph.nodes:
+        if n is "0":
+            continue
+        impedance = "1/("
+        #print(n)
+        for ne in circuit.multigraph.neighbors(n):
+            for k in circuit.multigraph.get_edge_data(n , ne):
+                if not isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageDependentCurrentSource) and not isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageSource) and not isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.CurrentSource):
+                    impedance += " + " + ("(s*"+circuit.multigraph.edges[n,ne,k]['component'].name +")" if isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.Capacitor) else "1/" + circuit.multigraph.edges[n,ne,k]['component'].name)
+                if ne != "0":
+                    #print("not ground!")
+                    #print(isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageDependentCurrentSource))
+                    #print(circuit.multigraph.edges[n,ne,k]['component'])
+                    if not isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageDependentCurrentSource) and not isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageSource) and not isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.CurrentSource):
+                        cur_target = "Isc" + ne[1:].lower() if ne.startswith("V") else "Isc" + ne.lower()
+                        cur_source = "V" + n.lower() if not n.startswith("V") else n
+                        if sfg.graph.has_edge(cur_source, cur_target):
+                            sfg.graph.edges[cur_source , cur_target]['weight'] += " + " + ("(s*"+circuit.multigraph.edges[n,ne,k]['component'].name +")" if isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.Capacitor) else "1/" + circuit.multigraph.edges[n,ne,k]['component'].name)
+                        else:
+                            sfg.graph.add_edge(cur_source , cur_target , weight = "+" + ("(s*"+circuit.multigraph.edges[n,ne,k]['component'].name +")" if isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.Capacitor) else "1/" + circuit.multigraph.edges[n,ne,k]['component'].name))
+                    elif isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageDependentCurrentSource):
+                        print("found volage dependent current source!!")
+                        cur_target = "Isc" + n[1:].lower() if n.startswith("V") else "Isc" + n.lower()
+                        pos_input_node = circuit.multigraph.edges[n,ne,k]['component'].pos_input_node
+                        neg_input_node = circuit.multigraph.edges[n,ne,k]['component'].neg_input_node
+                        cur_source_1 = "V" + pos_input_node.lower() if not pos_input_node.startswith("V") else pos_input_node
+                        if sfg.graph.has_edge(cur_source_1, cur_target):
+                            sfg.graph.edges[cur_source_1, cur_target]['weight'] += (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " + ") + "gm_" + str(circuit.multigraph.edges[n,ne,k]['component'].name[-1])
+                        else:
+                            sfg.graph.add_edge( cur_source_1, cur_target , weight = (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " + ") + "gm_" + str(circuit.multigraph.edges[n,ne,k]['component'].name[-1]))
+                            
+                        cur_source_2 = "V" + neg_input_node.lower() if not neg_input_node.startswith("V") else neg_input_node
+                        
+                        if sfg.graph.has_edge(cur_source_2, cur_target):
+                            sfg.graph.edges[cur_source_2, cur_target]['weight'] += (" + " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " - ") + "gm_" + str(circuit.multigraph.edges[n,ne,k]['component'].name[-1])
+                        else:
+                            sfg.graph.add_edge( cur_source_2, cur_target , weight = (" + " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " - ") + "gm_" + str(circuit.multigraph.edges[n,ne,k]['component'].name[-1]))
+        if impedance != "1/(":
+            impedance += ")"
+        #print(impedance)
+        impedance_list.append(impedance)
+        source = "Isc" + n[1:].lower() if n.startswith("V") else "Isc" + n.lower()
+        target = "V" + n.lower() if not n.startswith("V") else n
+        sfg.graph.add_edge(  source , target , weight = impedance )
+        
+        
+        
+        
+    print("graph information")
+    for e in sfg.graph.edges:
+        print(e)
+        print(sfg.graph.get_edge_data(*e))
+    #print("impedance_list:",impedance_list)
+        sfg.graph.get_edge_data(*e)['weight'] = sy.sympify( sfg.graph.get_edge_data(*e)['weight'] )
+    print("After transferring data to sympy")
+    for e in sfg.graph.edges:
+        print("edge:(source , target)",e)
+        print("weight information:",sfg.graph.get_edge_data(*e))
+        print("\n")
+    return sfg
+
 class SFGraph(object):
     
     def __init__(self , nodes_list):
@@ -81,6 +153,9 @@ class SFGraph(object):
         self.adjacency = defaultdict(list)
         self.nodes_name_map = {}
         self.vertex = []
+        
+        
+        
         pass
     
     def add_edge(self , source , target , weight):
@@ -261,6 +336,8 @@ class Node:
                 current_Isc += ( component.current )
                 # if they are connected by resistors simply add 1/R to the current list
             elif node.voltage != 0:
+                print("node.voltage:")
+                print(node.voltage)
                 current_Isc += ( " + " + node.voltage + '/' + component.name + " " )
         #current_Isc = current_Isc[:-1]
         if current_Isc == "":
